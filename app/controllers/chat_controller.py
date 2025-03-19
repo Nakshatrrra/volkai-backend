@@ -29,7 +29,7 @@ def format_prompt(messages):
     return prompt
 
 
-async def stream_response(messages, max_tokens=200, temperature=0.7):
+async def stream_response(messages, max_tokens=500, temperature=0.5):
     """Streams the response from the Hugging Face inference API in real-time."""
     prompt = format_prompt(messages)
 
@@ -41,10 +41,23 @@ async def stream_response(messages, max_tokens=200, temperature=0.7):
             stream=True
         )
 
+        last_tokens = []  # Store last few tokens to check for end-of-text
+
         try:
             for chunk in output:
                 if isinstance(chunk, dict) and "token" in chunk:
-                    yield f"data: {chunk['token']}\n\n"  # Format for proper event streaming
+                    token = chunk["token"]
+                    last_tokens.append(token)
+
+                    # Keep only the last 10 tokens to check for "<|endoftext|>"
+                    if len(last_tokens) > 10:
+                        last_tokens.pop(0)
+
+                    last_text = "".join(last_tokens)
+                    if "<|endoftext|>" in last_text:
+                        break  # Stop processing when end token is detected
+
+                    yield f"data: {token}\n\n"  # Format for proper event streaming
                 elif isinstance(chunk, str):
                     yield f"data: {chunk}\n\n"
                 await asyncio.sleep(0)  # Allows event loop to send data immediately
