@@ -50,42 +50,49 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
 
         accumulated_text = ""  # Track the complete text
         end_token = "<|endoftext|>"
+        buffer = ""  # Buffer to help detect end token across chunks
         
         try:
             for chunk in output:
+                token = ""
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
-                    
-                    # Check if this token is part of the end token
-                    test_text = accumulated_text + token
-                    if end_token in test_text:
-                        end_index = test_text.find(end_token)
-                        # If there's content before the end token, send it
-                        if end_index > len(accumulated_text):
-                            content_to_send = test_text[len(accumulated_text):end_index]
-                            if content_to_send:
-                                yield f"data: {content_to_send}\n\n"
-                        break  # Exit the loop completely
-                    
-                    accumulated_text += token
-                    yield f"data: {token}\n\n"  # Format for proper event streaming
                 elif isinstance(chunk, str):
-                    # Similar check for string chunks
-                    test_text = accumulated_text + chunk
-                    if end_token in test_text:
-                        end_index = test_text.find(end_token)
-                        # If there's content before the end token, send it
-                        if end_index > len(accumulated_text):
-                            content_to_send = test_text[len(accumulated_text):end_index]
-                            if content_to_send:
-                                yield f"data: {content_to_send}\n\n"
-                        break
-                    
-                    accumulated_text += chunk
-                    print(chunk)
-                    yield f"data: {chunk}\n\n"
+                    token = chunk
                 
-                await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
+                if not token:
+                    continue
+                
+                # Add to buffer for end token detection
+                buffer += token
+                
+                # If buffer contains more characters than end token, we can send some
+                if len(buffer) > len(end_token):
+                    # Check if end token is in buffer
+                    if end_token in buffer:
+                        # Get position of end token
+                        end_pos = buffer.find(end_token)
+                        # Only yield content before the end token
+                        content_to_send = buffer[:end_pos]
+                        if content_to_send:
+                            yield f"data: {content_to_send}\n\n"
+                        break  # Stop streaming
+                    else:
+                        # Safe to send content up to the potential start of end token
+                        safe_length = len(buffer) - len(end_token) + 1
+                        content_to_send = buffer[:safe_length]
+                        buffer = buffer[safe_length:]  # Keep remaining part in buffer
+                        if content_to_send:
+                            accumulated_text += content_to_send
+                            yield f"data: {content_to_send}\n\n"
+                
+                await asyncio.sleep(0.01)
+            
+            # If we've exited the loop without finding the end token,
+            # send any remaining content in the buffer
+            if buffer and end_token not in buffer:
+                yield f"data: {buffer}\n\n"
+                
         except Exception as e:
             logger.error(f"Error in streaming: {e}")
             yield "data: [Error] Streaming response failed.\n\n"
