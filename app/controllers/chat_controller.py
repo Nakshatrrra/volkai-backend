@@ -48,30 +48,41 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
         )
 
         accumulated_text = ""  # Track the complete text
-        buffer = ""  # Buffer to check for "<|endoftext|>"
         end_token = "<|endoftext|>"
-
+        
         try:
             for chunk in output:
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
+                    
+                    # Check if this token is part of the end token
+                    test_text = accumulated_text + token
+                    if end_token in test_text:
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text):
+                            content_to_send = test_text[len(accumulated_text):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
+                        break  # Exit the loop completely
+                    
+                    accumulated_text += token
+                    yield f"data: {token}\n\n"  # Format for proper event streaming
                 elif isinstance(chunk, str):
-                    token = chunk
-                else:
-                    continue  # Skip if the format is unexpected
-
-                buffer += token  # Add token to buffer
-
-                # If buffer starts forming "<|endoftext|>", stop streaming before sending "<"
-                if buffer.startswith("<") and end_token.startswith(buffer):
-                    if end_token == buffer:  # If full end token is formed, break
+                    # Similar check for string chunks
+                    test_text = accumulated_text + chunk
+                    if end_token in test_text:
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text):
+                            content_to_send = test_text[len(accumulated_text):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
                         break
-                    continue  # Don't send tokens yet, wait for full confirmation
-
-                accumulated_text += buffer
-                yield f"data: {buffer}\n\n"
-                buffer = ""  # Reset buffer after sending
-
+                    
+                    accumulated_text += chunk
+                    yield f"data: {chunk}\n\n"
+                
                 await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
         except Exception as e:
             logger.error(f"Error in streaming: {e}")
