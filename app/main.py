@@ -18,4 +18,4 @@ app.include_router(chat.router, prefix="/api")
 
 @app.get("/")
 def home():
-    return {"message": "VolkAI Chat API is running!"}
+    return {"message": "VolkAI Chat API is running updated!"}
