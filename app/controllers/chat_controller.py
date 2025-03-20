@@ -47,9 +47,10 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
             stream=True
         )
 
-        accumulated_text = ""  # Stores the full generated text
-        token_buffer = ""  # Stores partial tokens
-        end_token = "<|endoftext|>"
+        accumulated_tokens = []  # Store tokens in batches
+        batch_size = 3  # Accumulate 15 tokens before sending
+        stop_flag = False
+        last_token = ""  # Store the last token to check for "<|"
 
         try:
             for chunk in output:
@@ -60,20 +61,24 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
                 else:
                     continue
 
-                token_buffer += token  # Collect tokens in buffer
-
-                # Check if end_token is in the buffer
-                if end_token in token_buffer:
-                    end_index = token_buffer.find(end_token)
-                    yield f"data: {token_buffer[:end_index]}\n\n"
+                # Check if previous token was "<" and current token is "|"
+                if last_token == "<" and token.startswith("|"):
+                    stop_flag = True
                     break  # Stop streaming
 
-                # Only send when we are sure it's not part of end_token
-                if not end_token.startswith(token_buffer):
-                    yield f"data: {token_buffer}\n\n"
-                    token_buffer = ""  # Reset buffer after sending
-                
-                await asyncio.sleep(0.01)
+                accumulated_tokens.append(token)
+                last_token = token  # Store last token
+
+                # If accumulated 15 tokens, send as batch
+                if len(accumulated_tokens) >= batch_size:
+                    yield f"data: {''.join(accumulated_tokens)}\n\n"
+                    accumulated_tokens = []  # Reset buffer
+
+                await asyncio.sleep(0.01)  # Short delay to ensure proper streaming
+
+            # Send remaining tokens if any before stopping
+            if accumulated_tokens and not stop_flag:
+                yield f"data: {''.join(accumulated_tokens)}\n\n"
 
         except Exception as e:
             logger.error(f"Error in streaming: {e}")
