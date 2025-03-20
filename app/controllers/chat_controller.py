@@ -55,16 +55,15 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
                     
-                    # Check if adding this token would create or complete the end token
+                    # Check if this token is part of the end token
                     test_text = accumulated_text + token
                     if end_token in test_text:
-                        # Find where the end token starts in the accumulated text
-                        for i in range(len(test_text) - len(end_token) + 1):
-                            if test_text[i:i+len(end_token)] == end_token:
-                                # If this token is part of the end token, don't send it
-                                if i <= len(accumulated_text):
-                                    logger.debug("End token starting, stopping stream")
-                                    break
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text):
+                            content_to_send = test_text[len(accumulated_text):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
                         break  # Exit the loop completely
                     
                     accumulated_text += token
@@ -73,6 +72,12 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
                     # Similar check for string chunks
                     test_text = accumulated_text + chunk
                     if end_token in test_text:
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text):
+                            content_to_send = test_text[len(accumulated_text):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
                         break
                     
                     accumulated_text += chunk
