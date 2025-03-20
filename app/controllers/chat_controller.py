@@ -1,8 +1,13 @@
 import os
+import logging
 from fastapi.responses import StreamingResponse
 from huggingface_hub import InferenceClient
 from dotenv import load_dotenv
 import asyncio
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 load_dotenv()  # Load environment variables
 
@@ -32,6 +37,7 @@ def format_prompt(messages):
 async def stream_response(messages, max_tokens=500, temperature=0.5):
     """Streams the response from the Hugging Face inference API in real-time."""
     prompt = format_prompt(messages)
+    logger.debug(f"Generated prompt for streaming")
 
     async def event_generator():
         output = client.text_generation(
@@ -41,28 +47,36 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
             stream=True
         )
 
-        last_tokens = []  # Store last few tokens to check for end-of-text
+        accumulated_text = ""  # Track the complete text
 
         try:
             for chunk in output:
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
-                    last_tokens.append(token)
-
-                    # Keep only the last 10 tokens to check for "<|endoftext|>"
-                    if len(last_tokens) > 10:
-                        last_tokens.pop(0)
-
-                    last_text = "".join(last_tokens)
-                    if "<|endoftext|>" in last_text:
-                        break  # Stop processing when end token is detected
-
+                    accumulated_text += token
+                    
+                    # Check for end token in the entire accumulated text
+                    if "<|endoftext|>" in accumulated_text:
+                        logger.debug("End of text token detected, breaking stream")
+                        break
+                    
                     yield f"data: {token}\n\n"  # Format for proper event streaming
                 elif isinstance(chunk, str):
+                    accumulated_text += chunk
+                    if "<|endoftext|>" in accumulated_text:
+                        logger.debug("End of text token detected, breaking stream")
+                        break
                     yield f"data: {chunk}\n\n"
-                await asyncio.sleep(0)  # Allows event loop to send data immediately
+                
+                # Log occasionally to see progress without overwhelming logs
+                if len(accumulated_text) % 100 == 0:
+                    logger.debug(f"Accumulated text length: {len(accumulated_text)}")
+                
+                await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
         except Exception as e:
-            print(f"Error in streaming: {e}")
+            logger.error(f"Error in streaming: {e}")
             yield "data: [Error] Streaming response failed.\n\n"
+        
+        logger.debug("Streaming completed")
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
