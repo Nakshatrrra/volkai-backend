@@ -21,7 +21,7 @@ client = InferenceClient(base_url=HF_ENDPOINT, token=HF_TOKEN)
 def format_prompt(messages):
     """Formats messages into a format the model understands."""
     prompt = "### Context: You're VolkAI, Created by Kairosoft AI Solutions Limited.\n\n"
-    
+
     for msg in messages:
         if msg["role"] == "user":
             prompt += f"### Human: {msg['content']}\n"
@@ -29,9 +29,10 @@ def format_prompt(messages):
             prompt += f"### Assistant: {msg['content']}\n"
         elif msg["role"] == "system":
             prompt += f"### Context: {msg['content']}\n"
-    
+
     prompt += "### Assistant:"
     return prompt
+
 
 async def stream_response(messages, max_tokens=500, temperature=0.5):
     """Streams the response from the Hugging Face inference API in real-time."""
@@ -46,51 +47,38 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
             stream=True
         )
 
-        accumulated_text = ""  # Track the complete text
+        accumulated_text = ""  # Stores the full generated text
+        token_buffer = ""  # Stores partial tokens
         end_token = "<|endoftext|>"
-        
+
         try:
             for chunk in output:
-                # Extract the token from the chunk
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
                 elif isinstance(chunk, str):
                     token = chunk
                 else:
                     continue
+
+                token_buffer += token  # Collect tokens in buffer
+
+                # Check if end_token is in the buffer
+                if end_token in token_buffer:
+                    end_index = token_buffer.find(end_token)
+                    yield f"data: {token_buffer[:end_index]}\n\n"
+                    break  # Stop streaming
+
+                # Only send when we are sure it's not part of end_token
+                if not end_token.startswith(token_buffer):
+                    yield f"data: {token_buffer}\n\n"
+                    token_buffer = ""  # Reset buffer after sending
                 
-                # Check if this token is part of the end token sequence
-                test_text = accumulated_text + token
-                
-                # If we find the end token in our text, stop processing
-                if end_token in test_text:
-                    end_index = test_text.find(end_token)
-                    # Only send content before the end token
-                    if end_index > len(accumulated_text):
-                        content_to_send = test_text[len(accumulated_text):end_index]
-                        if content_to_send:
-                            yield f"data: {content_to_send}\n\n"
-                    break
-                
-                # Skip tokens that are part of the end token pattern
-                if any(part in token for part in ['<', '|', 'end', 'of', 'text', '>']):
-                    continue
-                
-                # Skip any other control characters or unwanted tokens
-                if token.strip() == "" or token in ['\n', '.', ',', '!', '?']:
-                    # Still accumulate them but don't yield them individually
-                    accumulated_text += token
-                    continue
-                
-                # Only yield tokens that are meaningful words or parts of words
-                accumulated_text += token
-                yield f"data: {token}\n\n"
-                
-                await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
+                await asyncio.sleep(0.01)
+
         except Exception as e:
             logger.error(f"Error in streaming: {e}")
             yield "data: [Error] Streaming response failed.\n\n"
-        
+
         logger.debug("Streaming completed")
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
