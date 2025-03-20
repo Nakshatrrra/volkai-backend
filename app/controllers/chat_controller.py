@@ -44,7 +44,8 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
             prompt=prompt,
             max_new_tokens=max_tokens,
             temperature=temperature,
-            stream=True
+            stream=True,
+            decoder_input_details=True
         )
 
         accumulated_text = ""  # Track the complete text
@@ -81,6 +82,7 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
                         break
                     
                     accumulated_text += chunk
+                    print(chunk)
                     yield f"data: {chunk}\n\n"
                 
                 await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
