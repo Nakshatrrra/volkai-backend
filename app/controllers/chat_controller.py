@@ -47,41 +47,59 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
             stream=True
         )
 
+        accumulated_text = ""  # Track the complete text
         buffer = ""  # Buffer to accumulate tokens
         buffer_size = 8  # Number of tokens to buffer before sending
-        end_tokens = ["<|endoftext|>", "<|", "endof", "text", "|>", "<|e", "<|en", "<|end","<|endo","<|endof","<|endoft","<|endofte","<|endoftex"]  # All possible substrings to filter
+        end_token = "<|endoftext|>"
         
         try:
             for chunk in output:
-                token = ""
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
+                    
+                    # Check if this token is part of the end token
+                    test_text = accumulated_text + buffer + token
+                    if end_token in test_text:
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text):
+                            content_to_send = test_text[len(accumulated_text):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
+                        break  # Exit the loop completely
+                    
+                    accumulated_text += token
+                    buffer += token
+                    
+                    # Send buffer when it reaches the desired size
+                    if len(buffer) >= buffer_size:
+                        yield f"data: {buffer}\n\n"  # Format for proper event streaming
+                        buffer = ""  # Reset buffer after sending
+                        
                 elif isinstance(chunk, str):
-                    token = chunk
-                
-                # Skip any token that's part of the end token sequence
-                should_skip = False
-                for end_part in end_tokens:
-                    if end_part in token:
-                        should_skip = True
+                    # Similar check for string chunks
+                    test_text = accumulated_text + buffer + chunk
+                    if end_token in test_text:
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text + buffer):
+                            content_to_send = test_text[len(accumulated_text + buffer):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
                         break
+                    
+                    accumulated_text += chunk
+                    buffer += chunk
+                    
+                    # Send buffer when it reaches the desired size
+                    if len(buffer) >= buffer_size:
+                        yield f"data: {buffer}\n\n"
+                        buffer = ""  # Reset buffer after sending
                 
-                if should_skip:
-                    logger.debug(f"Skipping token containing end sequence: {token}")
-                    continue
-                
-                # Add valid token to buffer
-                buffer += token
-                
-                # Send buffer when it reaches the desired size
-                if len(buffer) >= buffer_size:
-                    yield f"data: {buffer}\n\n"  # Format for proper event streaming
-                    buffer = ""  # Reset buffer after sending
-                
-                await asyncio.sleep(0.01)
+                await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
             
             # Send any remaining buffered content at the end
-            if buffer:
+            if buffer and not end_token in buffer:
                 yield f"data: {buffer}\n\n"
                 
         except Exception as e:
