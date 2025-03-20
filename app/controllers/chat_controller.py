@@ -17,6 +17,7 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 
 client = InferenceClient(base_url=HF_ENDPOINT, token=HF_TOKEN)
 
+
 def format_prompt(messages):
     """Formats messages into a format the model understands."""
     prompt = "### Context: You're VolkAI, Created by Kairosoft AI Solutions Limited.\n\n"
@@ -32,6 +33,7 @@ def format_prompt(messages):
     prompt += "### Assistant:"
     return prompt
 
+
 async def stream_response(messages, max_tokens=500, temperature=0.5):
     """Streams the response from the Hugging Face inference API in real-time."""
     prompt = format_prompt(messages)
@@ -46,46 +48,42 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
         )
 
         accumulated_text = ""  # Track the complete text
-        buffer = ""  # Buffer to accumulate tokens
-        buffer_size = 8  # Number of tokens to buffer before sending
-        end_token_prefix = "<|e"
+        end_token = "<|endoftext|>"
         
         try:
             for chunk in output:
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
                     
-                    # Check if the token starts an end sequence
-                    if end_token_prefix in (accumulated_text + token):
-                        break
+                    # Check if this token is part of the end token
+                    test_text = accumulated_text + token
+                    if end_token in test_text:
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text):
+                            content_to_send = test_text[len(accumulated_text):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
+                        break  # Exit the loop completely
                     
                     accumulated_text += token
-                    buffer += token
-                    
-                    # Send buffer when it reaches the desired size
-                    if len(buffer) >= buffer_size:
-                        yield f"data: {buffer}\n\n"
-                        buffer = ""  # Reset buffer after sending
-                    
+                    yield f"data: {token}\n\n"  # Format for proper event streaming
                 elif isinstance(chunk, str):
-                    # Check if the token starts an end sequence
-                    if end_token_prefix in (accumulated_text + chunk):
+                    # Similar check for string chunks
+                    test_text = accumulated_text + chunk
+                    if end_token in test_text:
+                        end_index = test_text.find(end_token)
+                        # If there's content before the end token, send it
+                        if end_index > len(accumulated_text):
+                            content_to_send = test_text[len(accumulated_text):end_index]
+                            if content_to_send:
+                                yield f"data: {content_to_send}\n\n"
                         break
                     
                     accumulated_text += chunk
-                    buffer += chunk
-                    
-                    # Send buffer when it reaches the desired size
-                    if len(buffer) >= buffer_size:
-                        yield f"data: {buffer}\n\n"
-                        buffer = ""  # Reset buffer after sending
+                    yield f"data: {chunk}\n\n"
                 
-                await asyncio.sleep(0.01)  # Small delay to allow proper chunking
-            
-            # Send any remaining buffered content at the end
-            if buffer:
-                yield f"data: {buffer}\n\n"
-                
+                await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
         except Exception as e:
             logger.error(f"Error in streaming: {e}")
             yield "data: [Error] Streaming response failed.\n\n"
