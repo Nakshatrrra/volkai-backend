@@ -48,9 +48,8 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
         )
 
         accumulated_tokens = []  # Store tokens in batches
-        batch_size = 3  # Accumulate 15 tokens before sending
-        stop_flag = False
-        last_token = ""  # Store the last token to check for "<|"
+        batch_size = 7  # Accumulate 15 tokens before sending
+        stop_sequence = "<|"
 
         try:
             for chunk in output:
@@ -61,24 +60,31 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
                 else:
                     continue
 
-                # Check if previous token was "<" and current token is "|"
-                if last_token == "<" and token.startswith("|"):
-                    stop_flag = True
-                    break  # Stop streaming
-
                 accumulated_tokens.append(token)
-                last_token = token  # Store last token
 
                 # If accumulated 15 tokens, send as batch
                 if len(accumulated_tokens) >= batch_size:
-                    yield f"data: {''.join(accumulated_tokens)}\n\n"
+                    text_batch = "".join(accumulated_tokens)
+
+                    # Check for stop sequence "<|" and trim everything after
+                    stop_index = text_batch.find(stop_sequence)
+                    if stop_index != -1:
+                        yield f"data: {text_batch[:stop_index]}\n\n"
+                        break  # End stream
+
+                    yield f"data: {text_batch}\n\n"
                     accumulated_tokens = []  # Reset buffer
 
                 await asyncio.sleep(0.01)  # Short delay to ensure proper streaming
 
-            # Send remaining tokens if any before stopping
-            if accumulated_tokens and not stop_flag:
-                yield f"data: {''.join(accumulated_tokens)}\n\n"
+            # Send remaining tokens if any
+            if accumulated_tokens:
+                text_batch = "".join(accumulated_tokens)
+                stop_index = text_batch.find(stop_sequence)
+                if stop_index != -1:
+                    yield f"data: {text_batch[:stop_index]}\n\n"
+                else:
+                    yield f"data: {text_batch}\n\n"
 
         except Exception as e:
             logger.error(f"Error in streaming: {e}")
