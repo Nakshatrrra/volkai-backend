@@ -33,7 +33,6 @@ def format_prompt(messages):
     prompt += "### Assistant:"
     return prompt
 
-
 async def stream_response(messages, max_tokens=500, temperature=0.5):
     """Streams the response from the Hugging Face inference API in real-time."""
     prompt = format_prompt(messages)
@@ -52,36 +51,40 @@ async def stream_response(messages, max_tokens=500, temperature=0.5):
         
         try:
             for chunk in output:
+                # Extract the token from the chunk
                 if isinstance(chunk, dict) and "token" in chunk:
                     token = chunk["token"]
-                    
-                    # Check if this token is part of the end token
-                    test_text = accumulated_text + token
-                    if end_token in test_text:
-                        end_index = test_text.find(end_token)
-                        # If there's content before the end token, send it
-                        if end_index > len(accumulated_text):
-                            content_to_send = test_text[len(accumulated_text):end_index]
-                            if content_to_send:
-                                yield f"data: {content_to_send}\n\n"
-                        break  # Exit the loop completely
-                    
-                    accumulated_text += token
-                    yield f"data: {token}\n\n"  # Format for proper event streaming
                 elif isinstance(chunk, str):
-                    # Similar check for string chunks
-                    test_text = accumulated_text + chunk
-                    if end_token in test_text:
-                        end_index = test_text.find(end_token)
-                        # If there's content before the end token, send it
-                        if end_index > len(accumulated_text):
-                            content_to_send = test_text[len(accumulated_text):end_index]
-                            if content_to_send:
-                                yield f"data: {content_to_send}\n\n"
-                        break
-                    
-                    accumulated_text += chunk
-                    yield f"data: {chunk}\n\n"
+                    token = chunk
+                else:
+                    continue
+                
+                # Check if this token is part of the end token sequence
+                test_text = accumulated_text + token
+                
+                # If we find the end token in our text, stop processing
+                if end_token in test_text:
+                    end_index = test_text.find(end_token)
+                    # Only send content before the end token
+                    if end_index > len(accumulated_text):
+                        content_to_send = test_text[len(accumulated_text):end_index]
+                        if content_to_send:
+                            yield f"data: {content_to_send}\n\n"
+                    break
+                
+                # Skip tokens that are part of the end token pattern
+                if any(part in token for part in ['<', '|', 'end', 'of', 'text', '>']):
+                    continue
+                
+                # Skip any other control characters or unwanted tokens
+                if token.strip() == "" or token in ['\n', '.', ',', '!', '?']:
+                    # Still accumulate them but don't yield them individually
+                    accumulated_text += token
+                    continue
+                
+                # Only yield tokens that are meaningful words or parts of words
+                accumulated_text += token
+                yield f"data: {token}\n\n"
                 
                 await asyncio.sleep(0.01)  # Slightly longer sleep to ensure proper chunking
         except Exception as e:
